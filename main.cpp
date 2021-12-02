@@ -33,6 +33,7 @@ bool getNOrMask(bool maskArray[], bool outputArray[], int n);
 bool getXOrMask(bool maskArray[], bool outputArray[], int n);
 bool getXNOrMask(bool maskArray[], bool outputArray[], int n);
 int findMax(float arr[], int n, int gateCount[], int popIndex[]);
+int seed;
 
 int main(int argc, const char * argv[]) {
 
@@ -42,7 +43,8 @@ int main(int argc, const char * argv[]) {
     //srand(time.tv_usec);
 
     //Randomize with a number
-    srand(0);
+    seed = 2;
+    srand(seed);
 
     //Read CSV File
     std::ifstream myFile("pima.csv");
@@ -274,11 +276,15 @@ int main(int argc, const char * argv[]) {
     //Number of gates for each population
     int gateCount[populationSize];
     //Determine iteration count manually
-    int iterationCount = 10000;
+    int iterationCount = 3000;
     //Define initial max number of gates. This number will be increased gradually over iterations
     float initialMaxGates = 1.0f;
     //Number of max connections for each gate. Determined randomly (minimum=2)
-    int connectMax = 6;
+    int connectMax = 4;
+    //Are we going to use XOR gates (XOR-XNOR)?
+    bool useXOR= true;
+    int maxGateType;
+    if (useXOR) maxGateType=5;else maxGateType=3;
 
     //Define column strings
     //popBits are connection masks for each gate. 1 denotes a connection and 0 denotes no connection
@@ -294,12 +300,12 @@ int main(int argc, const char * argv[]) {
     int tournamentCount = (int)((float)populationSize*tournamentRate);
 
     //Crossover Parameters
-    float crossoverRate = 0.75f;
+    float crossoverRate = 0.55f;
     float gateTypeCrossoverRate = 1.0f;//This is a new parameter checking if gateType will be crossed during crossover (together with the bits)
 
     //Mutation Parameters
     float mutationRate = 0.1f;
-    float gateMutationRate = 0.9f;//A new parameter to mutate gateType
+    float gateMutationRate = 1.0f;//A new parameter to mutate gateType
 
     //Elitism parameter
     float elitismRate = 0.03f;
@@ -313,7 +319,7 @@ int main(int argc, const char * argv[]) {
 
     //Evaluation Parameters
     bool useKFold= true;
-    int currentKFold=0;
+    int currentKFold=5;
 
     //Let's start GA!
     //Create Initial Population
@@ -336,7 +342,7 @@ int main(int argc, const char * argv[]) {
             // 3:NOR
             // 4:XOR
             // 5:XNOR
-            popGateType[popIndex][gateIndex]= random(0, 5);
+            popGateType[popIndex][gateIndex]= random(0, maxGateType);
             //Let's start randomly filling gate masks
                 //Define sub array
                 //The length of array is number of inputs+gate index (gateindex+numberOfInputBits)
@@ -364,10 +370,29 @@ int main(int argc, const char * argv[]) {
     int *popGateTypeAfterMutation[populationSize];
     int gateCountAfterMutation[populationSize];
 
+    float testAccOnIterations;
+
     float bestTestAcc=0;
     int bestTestAccIndex;
     int bestTestAccIteration;
     bool bestTestAccChanged;
+
+    int bestTP = 0;
+    int bestFP = 0;
+    int bestTN = 0;
+    int bestFN = 0;
+
+    float bestRecall=0;
+    float bestPrecision=0;
+    float bestF_Score=0;
+    float bestSpecificity=0;
+    float bestFalsePositiveRate;
+
+    float bestBalancedAccuracy;
+
+    float trainAccOnEachIteration[iterationCount];
+    float testAccOnEachIteration[iterationCount];
+
 
     float bestTrainAcc = 0.0f;
     int bestTrainAccIndex;
@@ -412,6 +437,7 @@ int main(int argc, const char * argv[]) {
         if (useKFold)
         {
             //Use kFold
+            float bestTrainAccInPop=0;
             for (int popIndex = 0; popIndex < populationSize; popIndex++) {
                 int numberOfCorrect = 0;
                 //Define bit output
@@ -462,14 +488,22 @@ int main(int argc, const char * argv[]) {
                     if (bitOutput[numberOfInputBits + gateCount[popIndex] - 1] == kTrain_y[currentKFold][rowIndex][0]) numberOfCorrect++;
                 }//end loop for Rows
                 popAcc[popIndex] = (float) numberOfCorrect / (float) (numberOfTotalRows - numberOfSamplesForEachK);
+                if (popAcc[popIndex]>bestTrainAccInPop)
+                    bestTrainAccInPop = popAcc[popIndex];
             }//end loop for popIndex (Calculate accuracies)
+            trainAccOnEachIteration[iterationIndex] = bestTrainAccInPop;
         }
 
         //Calculate test accuracy and report
         if (useKFold)
         {
+            float bestTestAccInPop=0;
             for (int popIndex = 0; popIndex < populationSize; popIndex++) {
                 int numberOfCorrect = 0;
+                int TP = 0;
+                int FP = 0;
+                int TN = 0;
+                int FN = 0;
                 //Define bit output
                 bool bitOutput[numberOfInputBits + gateCount[popIndex]];
                 //Start with iterating through input rows
@@ -515,19 +549,70 @@ int main(int argc, const char * argv[]) {
 
                     //Now, we can check if the last gate (output) is equal to expected output
                     if (bitOutput[numberOfInputBits + gateCount[popIndex] - 1] == kTest_y[currentKFold][rowIndex][0]) numberOfCorrect++;
+                    //Calculate confusion matrix variables
+                    if (kTest_y[currentKFold][rowIndex][0]==1) //Positive class
+                    {
+                        //TP:The model predicted the positive class correctly, to be a positive class.
+                        if (bitOutput[numberOfInputBits + gateCount[popIndex] - 1] == kTest_y[currentKFold][rowIndex][0]) TP++;
+                        //FN:The model predicted the positive class incorrectly, to be the negative class. (Type-2 Error)
+                        else FN++;
+                    }
+                    else //Negative class
+                    {
+                        //TN:The model predicted the negative class correctly, to be the negative class.
+                        if (bitOutput[numberOfInputBits + gateCount[popIndex] - 1] == kTest_y[currentKFold][rowIndex][0]) TN++;
+                        //FP:The model predicted the negative class incorrectly, to be a positive class. (Type-1 Error)
+                        else FP++;
+                    }
                 }//end loop for Rows
                 float testAcc = (float) numberOfCorrect / (float) numberOfSamplesForEachK;
+                float recall = (float) TP / ((float) (TP+FN));
+                float precision = (float) TP / ((float) (TP+FP));
+                float f1_score = (2.0f * recall * precision) / (recall + precision);
+                float specificity = float (TN) / ((float) (TN+FP));
+                float balancedAccuracy = ((float)(recall + specificity)) / 2.0f;
+                float falsePositiveRate = (float) FP / ((float)(FP+TN));
+
+                //Record best test acc in population
+                if (testAcc>bestTestAccInPop)
+                    bestTestAccInPop=testAcc;
+
+                //Record best test acc overall
                 if (testAcc > bestTestAcc) {
                     bestTestAcc = testAcc;
                     bestTestAccIndex = popIndex;
                     bestTestAccIteration = iterationIndex;
                     bestTestAccChanged = true;
 
+
+
+                    bestTP = TP;
+                    bestTN = TN;
+                    bestFP = FP;
+                    bestFN = FN;
+
+                    bestRecall = recall;
+                    bestPrecision = precision;
+                    bestF_Score = f1_score;
+                    bestSpecificity = specificity;
+                    bestBalancedAccuracy = balancedAccuracy;
+                    bestFalsePositiveRate = falsePositiveRate;
+
                     printf("\n*************** Printing Gates for the new best on Test Accuracy **********\n");
                     printf("Iteration: %d\n",bestTestAccIteration);
                     printf("Population member: %d\n",bestTestAccIndex);
                     printf("Train accuracy: %f\n",popAcc[bestTestAccIndex]);
                     printf("Test accuracy: %f\n",bestTestAcc);
+                    printf("Best TP: %d\n",bestTP);
+                    printf("Best TN: %d\n",bestTN);
+                    printf("Best FP: %d\n",bestFP);
+                    printf("Best FN: %d\n",bestFN);
+                    printf("Recall (Sensitivity-TPR): %.8f\n",bestRecall);
+                    printf("Precision - PPV: %.8f\n",bestPrecision);
+                    printf("Specificity - TNR: %.8f\n",bestSpecificity);
+                    printf("False Positive Rate (FPR) (1-Specificity): %.8f\n",bestFalsePositiveRate);
+                    printf("F1-Score: %.8f\n",bestF_Score);
+                    printf("Balanced Accuracy: %.8f\n",bestBalancedAccuracy);
                     printf("Gate count for best pop: %d\n",gateCount[bestTestAccIndex]);
                     printf("--------------------------------------------------\n");
                     for (int gIndex=0;gIndex<gateCount[bestTestAccIndex];gIndex++)
@@ -545,6 +630,8 @@ int main(int argc, const char * argv[]) {
             }//end loop for test accuracy
             printf("..Best Test Accuracy: %f at Iteration %d, Pop %d, with Train acc:%f\n", bestTestAcc, bestTestAccIteration,
                    bestTestAccIndex,popAcc[bestTestAccIndex]);
+            testAccOnEachIteration[iterationIndex] = bestTestAccInPop;
+
 
         }
 
@@ -602,7 +689,7 @@ int main(int argc, const char * argv[]) {
                 // 3:NOR
                 // 4:XOR
                 // 5:XNOR
-                popGateTypeSorted[popIndex][gateIndex]= random(0, 5);
+                popGateTypeSorted[popIndex][gateIndex]= random(0, maxGateType);
 
                 //Let's start randomly filling gate masks
                     //Define sub array
@@ -707,7 +794,7 @@ int main(int argc, const char * argv[]) {
         int *popGateTypeAfterTournament[populationSize];
         int gateCountAfterTournament[populationSize];
 
-        //Iterate populationSize-popCountElite times (do not touch the elite!)
+        //Iterate populationSize-popCountElite times (Careful: elites can be selected as winners but do not override the elite!)
         for (int popIndex=0;popIndex<populationSize-popCountElite;popIndex++)
         {
             //Define temp array for tournament candidates
@@ -717,7 +804,7 @@ int main(int argc, const char * argv[]) {
             //Pick random members and add to array
             for (int i=0;i<tournamentCount;i++)
             {
-                int randomIndex = random(0,populationSize-1);
+                int randomIndex = random(0,populationSize-1);//Elites can also be selected in the tournament
                 tempTourIndex[i] = randomIndex;
                 tempTourAcc[i] = popAcc[randomIndex];
             }
@@ -911,7 +998,7 @@ int main(int argc, const char * argv[]) {
                     if (rForMutation<gateMutationRate)
                     {
                         //Randomly assign a new gate type
-                        popGateTypeAfterMutation[popIndex][gateIndex] = random(0,5);
+                        popGateTypeAfterMutation[popIndex][gateIndex] = random(0,maxGateType);
 
                         //Fill the bits randomly
                         //Let's start randomly filling gate masks
@@ -989,6 +1076,55 @@ int main(int argc, const char * argv[]) {
     //Now, let's see the results...
 
     printf("\n");
+
+    //Print Overall result
+    printf("\n*****************SUMMARY*****************\n");
+    printf("Population Count: %d\n",populationSize);
+    printf("Tournament ratio: %.2f\n",tournamentRate);
+    printf("Probability of crossover: %.2f\n",crossoverRate);
+    printf("Probability of mutation: %.2f\n", mutationRate);
+    printf("Elitism ratio: %.2f\n",elitismRate);
+    printf("Augmentation Ratio: %.2f\n",augmentationPopRate);
+    printf("Augmentation Speed: %.6f\n",augmentationRate);
+    printf("Max Connections: %d\n",connectMax);
+    printf("Use XOR: ");if (useXOR) printf("Yes\n");else printf("No\n");
+    printf("CV Splits: %d\n",numberOfK);
+    printf("Current CV Fold: %d\n",currentKFold);
+    printf("Seed: %d\n",seed);
+
+    printf("\n*************** OVERALL RESULT **********\n");
+    printf("Best found on iteration: %d\n",bestTestAccIteration);
+    printf("Population member: %d\n",bestTestAccIndex);
+    printf("Train accuracy: %f\n",popAcc[bestTestAccIndex]);
+    printf("Test accuracy: %f\n",bestTestAcc);
+    printf("Best TP: %d\n",bestTP);
+    printf("Best TN: %d\n",bestTN);
+    printf("Best FP: %d\n",bestFP);
+    printf("Best FN: %d\n",bestFN);
+    printf("Recall (Sensitivity-TPR): %.8f\n",bestRecall);
+    printf("Precision - PPV: %.8f\n",bestPrecision);
+    printf("Specificity - TNR: %.8f\n",bestSpecificity);
+    printf("False Positive Rate (FPR) (1-Specificity): %.8f\n",bestFalsePositiveRate);
+    printf("F1-Score: %.8f\n",bestF_Score);
+    printf("Balanced Accuracy: %.8f\n",bestBalancedAccuracy);
+    printf("Gate count for best pop: %d\n",gateCount[bestTestAccIndex]);
+    printf("--------------------------------------------------\n");
+    for (int gIndex=0;gIndex<gateCount[bestTestAccIndex];gIndex++)
+    {
+        printf("Gate: %d",gIndex);
+        if (gIndex==gateCount[bestTestAccIndex]-1) printf(" (Output gate)");
+        printf("\n");
+        printf("Gate type: %d\n",popGateType[bestTestAccIndex][gIndex]);
+        printf("Gate connections:\n");
+        printArray(popBits[bestTestAccIndex][gIndex], gIndex + numberOfInputBits);
+    }
+    printf("\n****************************** Test Acc History *****************************\n");
+    for (int accH=0;accH<iterationCount;accH++)
+        printf("%.12f,",testAccOnEachIteration[accH]);
+    printf("\n****************************** Train Acc History *****************************\n");
+    for (int accH=0;accH<iterationCount;accH++)
+        printf("%.12f,",trainAccOnEachIteration[accH]);
+
     return 0;
 }
 
