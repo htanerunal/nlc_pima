@@ -34,6 +34,7 @@ bool getXOrMask(bool maskArray[], bool outputArray[], int n);
 bool getXNOrMask(bool maskArray[], bool outputArray[], int n);
 int findMax(float arr[], int n, int gateCount[], int popIndex[]);
 int seed;
+int fold;
 
 int main(int argc, const char * argv[]) {
 
@@ -43,7 +44,8 @@ int main(int argc, const char * argv[]) {
     //srand(time.tv_usec);
 
     //Randomize with a number
-    seed = 2;
+    seed = 0;
+    fold = 9;
     srand(seed);
 
     //Read CSV File
@@ -319,7 +321,7 @@ int main(int argc, const char * argv[]) {
 
     //Evaluation Parameters
     bool useKFold= true;
-    int currentKFold=5;
+    int currentKFold=fold;
 
     //Let's start GA!
     //Create Initial Population
