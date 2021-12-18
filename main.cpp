@@ -45,7 +45,7 @@ int main(int argc, const char * argv[]) {
 
     //Randomize with a number
     seed = 0;
-    fold = 9;
+    fold = 4;
     srand(seed);
 
     //Read CSV File
